@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Photocard Creator</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f5f8;
+    --surface: #ffffff;
+    --text: #1f1a24;
+    --muted: #6b6473;
+    --accent: #d6428e;
+    --accent-text: #ffffff;
+    --border: #e4e0e8;
+    --danger: #d94f4f;
+    --success: #2f9e5c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1b1720;
+      --surface: #262130;
+      --text: #f1eef5;
+      --muted: #a99fb3;
+      --accent: #ef6bab;
+      --accent-text: #1b1720;
+      --border: #3a3345;
+      --danger: #ff8080;
+      --success: #5cd08a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1b1720;
+    --surface: #262130;
+    --text: #f1eef5;
+    --muted: #a99fb3;
+    --accent: #ef6bab;
+    --accent-text: #1b1720;
+    --border: #3a3345;
+    --danger: #ff8080;
+    --success: #5cd08a;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 1.5rem;
+    min-height: 100vh;
+  }
+  h1 {
+    font-size: 1.4rem;
+    margin: 0 0 0.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .subtitle { color: var(--muted); margin: 0 0 1.5rem; font-size: 0.9rem; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.25rem;
+    margin-bottom: 1.25rem;
+  }
+  .panel h2 { font-size: 1rem; margin: 0 0 0.75rem; }
+
+  .format-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+  select, input[type="number"] {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 0.7rem;
+    font-size: 0.9rem;
+  }
+  .custom-dims { display: none; gap: 0.5rem; align-items: center; }
+  .custom-dims.visible { display: flex; }
+  .custom-dims input { width: 70px; }
+
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 14px;
+    padding: 2rem 1rem;
+    text-align: center;
+    color: var(--muted);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .dropzone.dragover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  .dropzone strong { color: var(--text); }
+  .dropzone input { display: none; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 0.9rem;
+    margin-top: 1rem;
+  }
+  .card-tile {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.5rem;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .card-tile img {
+    width: 100%;
+    aspect-ratio: var(--card-ratio, 54 / 86);
+    object-fit: cover;
+    border-radius: 6px;
+    background: var(--border);
+    display: block;
+  }
+  .tile-name { font-size: 0.72rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile-actions { display: flex; gap: 0.4rem; justify-content: center; }
+  .badge-ready { color: var(--success); font-size: 0.72rem; font-weight: 600; }
+  .badge-pending { color: var(--muted); font-size: 0.72rem; }
+
+  button {
+    font-family: inherit;
+    font-size: 0.85rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    padding: 0.45rem 0.8rem;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.small { padding: 0.3rem 0.55rem; font-size: 0.75rem; }
+  button.danger-text { color: var(--danger); border-color: transparent; background: transparent; }
+
+  .export-bar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+  .export-count { color: var(--muted); font-size: 0.85rem; margin-right: auto; }
+  .status-msg { font-size: 0.8rem; margin-top: 0.6rem; min-height: 1.1em; }
+  .status-msg.error { color: var(--danger); }
+  .status-msg.success { color: var(--success); }
+
+  /* Éditeur de recadrage */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+    display: none; align-items: center; justify-content: center; z-index: 50;
+    padding: 1rem;
+  }
+  .overlay.open { display: flex; }
+  .editor-box {
+    background: var(--surface);
+    border-radius: 16px;
+    padding: 1.25rem;
+    max-width: 420px;
+    width: 100%;
+    text-align: center;
+  }
+  .editor-box h3 { margin: 0 0 0.75rem; font-size: 1rem; }
+  .editor-canvas-wrap {
+    display: inline-block;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    touch-action: none;
+    cursor: grab;
+  }
+  .editor-canvas-wrap:active { cursor: grabbing; }
+  canvas#cropCanvas { display: block; max-width: 100%; }
+  .zoom-row { display: flex; align-items: center; gap: 0.6rem; margin: 1rem 0 0.5rem; }
+  .zoom-row input[type="range"] { flex: 1; }
+  .editor-hint { color: var(--muted); font-size: 0.78rem; margin: 0.3rem 0 1rem; }
+  .editor-actions { display: flex; gap: 0.6rem; justify-content: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎴 Photocard Creator</h1>
+  <p class="subtitle">Uploade tes photos, recadre-les aux dimensions réelles d'une photocard, exporte-les prêtes à imprimer.</p>
+
+  <div class="panel">
+    <h2>1. Format de la photocard</h2>
+    <div class="format-row">
+      <select id="formatSelect">
+        <option value="54x86">Standard kpop (54 × 86 mm)</option>
+        <option value="55x85">Format alternatif (55 × 85 mm)</option>
+        <option value="63x88">Format trading card (63 × 88 mm)</option>
+        <option value="custom">Personnalisé…</option>
+      </select>
+      <div class="custom-dims" id="customDims">
+        <input type="number" id="customW" min="10" max="200" value="54"> ×
+        <input type="number" id="customH" min="10" max="200" value="86"> mm
+      </div>
+      <span class="badge-pending" id="formatNote"></span>
+    </div>
+    <div class="format-row" style="margin-top:0.75rem;">
+      <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;cursor:pointer;">
+        <input type="checkbox" id="roundCorners" checked> Coins arrondis
+      </label>
+      <input type="number" id="cornerRadius" min="0" max="20" step="0.5" value="3" style="width:60px;"> mm
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>2. Ajouter des photos</h2>
+    <div class="dropzone" id="dropzone">
+      <strong>Glisse tes photos ici</strong><br>
+      ou clique pour parcourir tes fichiers
+      <input type="file" id="fileInput" accept="image/*" multiple>
+    </div>
+
+    <div class="grid" id="grid"></div>
+  </div>
+
+  <div class="panel">
+    <h2>3. Export</h2>
+    <div class="format-row" style="margin-bottom:0.9rem;">
+      <label for="cardGap" style="font-size:0.85rem;">Espacement entre cartes sur la planche PDF :</label>
+      <input type="number" id="cardGap" min="0" max="20" step="0.5" value="0" style="width:60px;"> mm
+    </div>
+    <div class="export-bar">
+      <span class="export-count" id="exportCount">0 carte prête</span>
+      <button class="small" id="btnZip">Télécharger les cartes (ZIP)</button>
+      <button class="primary small" id="btnPdf">Générer planche(s) A4 (PDF)</button>
+    </div>
+    <div class="status-msg" id="statusMsg"></div>
+  </div>
+</div>
+
+<!-- Éditeur de recadrage -->
+<div class="overlay" id="overlay">
+  <div class="editor-box">
+    <h3>Recadrer la photo</h3>
+    <div class="editor-canvas-wrap" id="canvasWrap">
+      <canvas id="cropCanvas"></canvas>
+    </div>
+    <div class="zoom-row">
+      <span style="font-size:0.8rem;color:var(--muted)">🔍</span>
+      <input type="range" id="zoomSlider" min="1" max="3" step="0.01" value="1">
+    </div>
+    <p class="editor-hint">Fais glisser l'image pour la repositionner, utilise le curseur pour zoomer.</p>
+    <div class="editor-actions">
+      <button id="btnCancelCrop">Annuler</button>
+      <button class="primary" id="btnConfirmCrop">Valider le recadrage</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const DPI = 300;
+  const MM_TO_PX = DPI / 25.4;
+
+  const formatSelect = document.getElementById('formatSelect');
+  const customDims = document.getElementById('customDims');
+  const customW = document.getElementById('customW');
+  const customH = document.getElementById('customH');
+  const formatNote = document.getElementById('formatNote');
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const grid = document.getElementById('grid');
+  const exportCount = document.getElementById('exportCount');
+  const btnZip = document.getElementById('btnZip');
+  const btnPdf = document.getElementById('btnPdf');
+  const statusMsg = document.getElementById('statusMsg');
+
+  const overlay = document.getElementById('overlay');
+  const cropCanvas = document.getElementById('cropCanvas');
+  const canvasWrap = document.getElementById('canvasWrap');
+  const zoomSlider = document.getElementById('zoomSlider');
+  const btnCancelCrop = document.getElementById('btnCancelCrop');
+  const btnConfirmCrop = document.getElementById('btnConfirmCrop');
+  const ctx = cropCanvas.getContext('2d');
+
+  let items = []; // { id, name, srcDataUrl, img, croppedDataUrl, ready, format }
+  let nextId = 1;
+
+  function saveBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function getCardMm() {
+    const val = formatSelect.value;
+    if (val === 'custom') {
+      return { w: parseFloat(customW.value) || 54, h: parseFloat(customH.value) || 86 };
+    }
+    const [w, h] = val.split('x').map(Number);
+    return { w, h };
+  }
+
+  function updateFormatUI() {
+    customDims.classList.toggle('visible', formatSelect.value === 'custom');
+    const { w, h } = getCardMm();
+    document.documentElement.style.setProperty('--card-ratio', `${w} / ${h}`);
+    formatNote.textContent = `Export à ${DPI} DPI → ${Math.round(w * MM_TO_PX)} × ${Math.round(h * MM_TO_PX)} px`;
+  }
+  formatSelect.addEventListener('change', updateFormatUI);
+  customW.addEventListener('input', updateFormatUI);
+  customH.addEventListener('input', updateFormatUI);
+  updateFormatUI();
+
+  // --- Upload (drag & drop + click) ---
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    handleFiles(e.dataTransfer.files);
+  });
+  fileInput.addEventListener('change', () => handleFiles(fileInput.files));
+
+  function handleFiles(fileList) {
+    Array.from(fileList).forEach(file => {
+      if (!file.type.startsWith('image/')) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        const img = new Image();
+        img.onload = () => {
+          items.push({
+            id: nextId++,
+            name: file.name,
+            img: img,
+            croppedDataUrl: null,
+            ready: false
+          });
+          renderGrid();
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+    fileInput.value = '';
+  }
+
+  function renderGrid() {
+    grid.innerHTML = '';
+    items.forEach(item => {
+      const tile = document.createElement('div');
+      tile.className = 'card-tile';
+
+      const img = document.createElement('img');
+      img.src = item.croppedDataUrl || item.img.src;
+      tile.appendChild(img);
+
+      const name = document.createElement('div');
+      name.className = 'tile-name';
+      name.textContent = item.name;
+      tile.appendChild(name);
+
+      const badge = document.createElement('div');
+      badge.className = item.ready ? 'badge-ready' : 'badge-pending';
+      badge.textContent = item.ready ? '✓ prête' : 'à recadrer';
+      tile.appendChild(badge);
+
+      const actions = document.createElement('div');
+      actions.className = 'tile-actions';
+
+      const btnCrop = document.createElement('button');
+      btnCrop.className = 'small';
+      btnCrop.textContent = item.ready ? 'Recadrer à nouveau' : 'Recadrer';
+      btnCrop.onclick = () => openEditor(item);
+      actions.appendChild(btnCrop);
+
+      const btnDel = document.createElement('button');
+      btnDel.className = 'small danger-text';
+      btnDel.textContent = 'Suppr.';
+      btnDel.onclick = () => { items = items.filter(i => i.id !== item.id); renderGrid(); };
+      actions.appendChild(btnDel);
+
+      tile.appendChild(actions);
+      grid.appendChild(tile);
+    });
+    updateExportBar();
+  }
+
+  function updateExportBar() {
+    const readyCount = items.filter(i => i.ready).length;
+    exportCount.textContent = readyCount + (readyCount > 1 ? ' cartes prêtes' : ' carte prête');
+    btnZip.disabled = readyCount === 0;
+    btnPdf.disabled = readyCount === 0;
+  }
+
+  // --- Éditeur de recadrage ---
+  let activeItem = null;
+  let exportW, exportH;
+  let scale, minScale, offsetX, offsetY;
+  let dragging = false, lastX = 0, lastY = 0;
+
+  function openEditor(item) {
+    activeItem = item;
+    const { w, h } = getCardMm();
+    exportW = Math.round(w * MM_TO_PX);
+    exportH = Math.round(h * MM_TO_PX);
+    cropCanvas.width = exportW;
+    cropCanvas.height = exportH;
+
+    const displayW = Math.min(320, exportW);
+    cropCanvas.style.width = displayW + 'px';
+    cropCanvas.style.height = (displayW * exportH / exportW) + 'px';
+
+    const img = item.img;
+    minScale = Math.max(exportW / img.naturalWidth, exportH / img.naturalHeight);
+    scale = minScale;
+    offsetX = (exportW - img.naturalWidth * scale) / 2;
+    offsetY = (exportH - img.naturalHeight * scale) / 2;
+    zoomSlider.value = 1;
+
+    drawCrop();
+    overlay.classList.add('open');
+  }
+
+  function clampOffsets() {
+    const img = activeItem.img;
+    const scaledW = img.naturalWidth * scale;
+    const scaledH = img.naturalHeight * scale;
+    offsetX = Math.min(0, Math.max(exportW - scaledW, offsetX));
+    offsetY = Math.min(0, Math.max(exportH - scaledH, offsetY));
+  }
+
+  function drawCrop() {
+    const img = activeItem.img;
+    ctx.clearRect(0, 0, exportW, exportH);
+    ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight,
+      offsetX, offsetY, img.naturalWidth * scale, img.naturalHeight * scale);
+  }
+
+  zoomSlider.addEventListener('input', () => {
+    const oldScale = scale;
+    scale = minScale * parseFloat(zoomSlider.value);
+    // garde le centre de la vue stable pendant le zoom
+    const cx = exportW / 2, cy = exportH / 2;
+    offsetX = cx - (cx - offsetX) * (scale / oldScale);
+    offsetY = cy - (cy - offsetY) * (scale / oldScale);
+    clampOffsets();
+    drawCrop();
+  });
+
+  function pointerPos(e) {
+    const rect = cropCanvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return {
+      x: (clientX - rect.left) * (exportW / rect.width),
+      y: (clientY - rect.top) * (exportH / rect.height)
+    };
+  }
+
+  canvasWrap.addEventListener('mousedown', startDrag);
+  canvasWrap.addEventListener('touchstart', startDrag, { passive: true });
+  window.addEventListener('mousemove', moveDrag);
+  window.addEventListener('touchmove', moveDrag, { passive: true });
+  window.addEventListener('mouseup', endDrag);
+  window.addEventListener('touchend', endDrag);
+
+  function startDrag(e) {
+    if (!activeItem) return;
+    dragging = true;
+    const p = pointerPos(e);
+    lastX = p.x; lastY = p.y;
+  }
+  function moveDrag(e) {
+    if (!dragging || !activeItem) return;
+    const p = pointerPos(e);
+    offsetX += (p.x - lastX);
+    offsetY += (p.y - lastY);
+    lastX = p.x; lastY = p.y;
+    clampOffsets();
+    drawCrop();
+  }
+  function endDrag() { dragging = false; }
+
+  function applyRoundedCorners(sourceCanvas, radiusPx) {
+    const out = document.createElement('canvas');
+    out.width = sourceCanvas.width;
+    out.height = sourceCanvas.height;
+    const octx = out.getContext('2d');
+    octx.drawImage(sourceCanvas, 0, 0);
+    octx.globalCompositeOperation = 'destination-in';
+    const w = out.width, h = out.height, r = Math.min(radiusPx, w / 2, h / 2);
+    octx.beginPath();
+    octx.moveTo(r, 0);
+    octx.arcTo(w, 0, w, h, r);
+    octx.arcTo(w, h, 0, h, r);
+    octx.arcTo(0, h, 0, 0, r);
+    octx.arcTo(0, 0, w, 0, r);
+    octx.closePath();
+    octx.fill();
+    return out;
+  }
+
+  btnCancelCrop.onclick = () => { overlay.classList.remove('open'); activeItem = null; };
+  btnConfirmCrop.onclick = () => {
+    const roundEnabled = document.getElementById('roundCorners').checked;
+    const radiusMm = parseFloat(document.getElementById('cornerRadius').value) || 0;
+
+    if (roundEnabled && radiusMm > 0) {
+      const rounded = applyRoundedCorners(cropCanvas, radiusMm * MM_TO_PX);
+      activeItem.croppedDataUrl = rounded.toDataURL('image/png');
+      activeItem.format = 'png';
+    } else {
+      activeItem.croppedDataUrl = cropCanvas.toDataURL('image/jpeg', 0.92);
+      activeItem.format = 'jpeg';
+    }
+    activeItem.ready = true;
+    overlay.classList.remove('open');
+    activeItem = null;
+    renderGrid();
+  };
+
+  // --- Export ---
+  function setStatus(msg, type) {
+    statusMsg.textContent = msg;
+    statusMsg.className = 'status-msg' + (type ? ' ' + type : '');
+  }
+
+  function dataUrlToUint8Array(dataUrl) {
+    const base64 = dataUrl.split(',')[1];
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  
+
+  btnZip.onclick = async () => {
+    const readyItems = items.filter(i => i.ready);
+    if (!readyItems.length) return;
+    setStatus('Préparation du ZIP…');
+    try {
+      const zip = new JSZip();
+      readyItems.forEach((item, idx) => {
+        const safeName = item.name.replace(/\.[^/.]+$/, '') || ('carte-' + (idx + 1));
+        const ext = item.format === 'png' ? 'png' : 'jpg';
+        zip.file(safeName + '.' + ext, dataUrlToUint8Array(item.croppedDataUrl));
+      });
+      const blob = await zip.generateAsync({ type: 'blob' });
+      saveBlob(blob, 'photocards.zip');
+      setStatus('ZIP téléchargé ✓', 'success');
+    } catch (err) {
+      setStatus('Erreur lors de la génération du ZIP.', 'error');
+    }
+  };
+
+  btnPdf.onclick = async () => {
+    const readyItems = items.filter(i => i.ready);
+    if (!readyItems.length) return;
+    setStatus('Génération de la planche PDF…');
+    try {
+      const { w: cardW, h: cardH } = getCardMm();
+      const pageW = 210, pageH = 297;
+      const gap = parseFloat(document.getElementById('cardGap').value) || 0;
+      const cols = Math.max(1, Math.floor((pageW + gap) / (cardW + gap)));
+      const rows = Math.max(1, Math.floor((pageH + gap) / (cardH + gap)));
+      const perPage = cols * rows;
+
+      const totalGridW = cols * cardW + (cols - 1) * gap;
+      const totalGridH = rows * cardH + (rows - 1) * gap;
+      const marginX = (pageW - totalGridW) / 2;
+      const marginY = (pageH - totalGridH) / 2;
+
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+
+      readyItems.forEach((item, idx) => {
+        const posInPage = idx % perPage;
+        if (idx > 0 && posInPage === 0) pdf.addPage();
+        const col = posInPage % cols;
+        const row = Math.floor(posInPage / cols);
+        const x = marginX + col * (cardW + gap);
+        const y = marginY + row * (cardH + gap);
+
+        pdf.addImage(item.croppedDataUrl, item.format === 'png' ? 'PNG' : 'JPEG', x, y, cardW, cardH);
+      });
+
+      // Lignes de coupe continues sur toute la page, aux bords de chaque carte
+      const xLines = new Set();
+      const yLines = new Set();
+      for (let c = 0; c < cols; c++) {
+        const left = marginX + c * (cardW + gap);
+        xLines.add(left.toFixed(3));
+        xLines.add((left + cardW).toFixed(3));
+      }
+      for (let r = 0; r < rows; r++) {
+        const top = marginY + r * (cardH + gap);
+        yLines.add(top.toFixed(3));
+        yLines.add((top + cardH).toFixed(3));
+      }
+
+      const totalPages = pdf.getNumberOfPages();
+      pdf.setDrawColor(180);
+      pdf.setLineWidth(0.15);
+      for (let p = 1; p <= totalPages; p++) {
+        pdf.setPage(p);
+        xLines.forEach(x => pdf.line(parseFloat(x), 0, parseFloat(x), pageH));
+        yLines.forEach(y => pdf.line(0, parseFloat(y), pageW, parseFloat(y)));
+      }
+
+      const blob = pdf.output('blob');
+      saveBlob(blob, 'planche-photocards.pdf');
+      setStatus('Planche PDF téléchargée ✓', 'success');
+    } catch (err) {
+      setStatus('Erreur lors de la génération du PDF.', 'error');
+    }
+  };
+})();
+</script>
+</body>
+</html>
